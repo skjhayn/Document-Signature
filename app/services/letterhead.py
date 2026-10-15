@@ -1,8 +1,9 @@
-"""A4 letterheads taken from the official Fund 1 stationery PDF.
+"""A4 letterheads taken from each fund's official stationery scan.
 
 Every upload is converted to A4 with a 3.75 cm top margin and a 2.75 cm
-bottom margin. Header and footer strips are cropped from Fund1.pdf so the
-default layout matches that file. Operators can still drag those strips.
+bottom margin. Header and footer strips are cropped from the fund's full-page
+letterhead PNG (``<slug>_letterhead.png``); Fund1.pdf is only a fallback.
+Operators can still drag those strips.
 """
 
 from __future__ import annotations
@@ -137,13 +138,22 @@ def letterhead_footer_path(fund_name: str) -> Path:
     return LETTERHEADS_DIR / f"{letterhead_slug(fund_name)}_footer.png"
 
 
+def letterhead_source_path(fund_name: str) -> Path:
+    """Full-page official letterhead scan for the fund."""
+    return LETTERHEADS_DIR / f"{letterhead_slug(fund_name)}_letterhead.png"
+
+
 def ensure_letterhead_assets() -> None:
     LETTERHEADS_DIR.mkdir(parents=True, exist_ok=True)
     _ensure_source_pdf()
     for fund_name in FUNDS:
         header = letterhead_header_path(fund_name)
         footer = letterhead_footer_path(fund_name)
-        if not header.exists() or not footer.exists():
+        source = letterhead_source_path(fund_name)
+        stale = source.exists() and header.exists() and (
+            header.stat().st_mtime < source.stat().st_mtime
+        )
+        if not header.exists() or not footer.exists() or stale:
             render_letterhead_strips(fund_name)
     if not LOGO_PATH.exists():
         _extract_logo_from_master()
@@ -179,6 +189,23 @@ def _band_crops(master: Image.Image, pdf_height: float) -> tuple[Image.Image, Im
     footer_h = max(1, int(round(MARGIN_BOTTOM_PT / pdf_height * height)))
     header = master.crop((0, 0, width, header_h))
     footer = master.crop((0, height - footer_h, width, height))
+    return header, footer
+
+
+def _crop_full_page_strips(source: Path) -> tuple[Image.Image, Image.Image]:
+    """Cut the top/bottom margin bands from a full-page letterhead scan.
+
+    Bands are sized from the image width so the strips keep the A4 aspect
+    and are not distorted when painted across the page.
+    """
+    with Image.open(source) as raw:
+        image = raw.convert("RGB")
+    width, height = image.size
+    px_per_pt = width / A4_WIDTH
+    header_h = min(height, max(1, int(round(MARGIN_TOP_PT * px_per_pt))))
+    footer_h = min(height, max(1, int(round(MARGIN_BOTTOM_PT * px_per_pt))))
+    header = image.crop((0, 0, width, header_h))
+    footer = image.crop((0, height - footer_h, width, height))
     return header, footer
 
 
@@ -478,13 +505,17 @@ def apply_letterhead(pdf_bytes: bytes, fund_name: str) -> bytes:
 
 
 def render_letterhead_strips(fund_name: str) -> tuple[Path, Path]:
-    """Crop header/footer from Fund1.pdf; swap only the fund address for other funds."""
+    """Crop header/footer from the fund's letterhead scan (Fund1.pdf as fallback)."""
     if fund_name not in FUNDS:
         raise ValueError(f"Unknown fund letterhead: {fund_name}")
     LETTERHEADS_DIR.mkdir(parents=True, exist_ok=True)
-    master, pdf_height = _load_master_page()
-    header, footer = _band_crops(master, pdf_height)
-    header = _compose_header(fund_name, header)
+    source = letterhead_source_path(fund_name)
+    if source.exists():
+        header, footer = _crop_full_page_strips(source)
+    else:
+        master, pdf_height = _load_master_page()
+        header, footer = _band_crops(master, pdf_height)
+        header = _compose_header(fund_name, header)
     header_path = letterhead_header_path(fund_name)
     footer_path = letterhead_footer_path(fund_name)
     header.save(header_path, format="PNG")

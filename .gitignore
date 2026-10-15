@@ -13,3 +13,6 @@ data/output/*
 data/audit/*.csv
 !data/audit/.gitkeep
 .streamlit/secrets.toml
+
+# Partner signatures are sensitive: keep them local only
+data/signatures/*.png
