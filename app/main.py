@@ -943,6 +943,8 @@ def _finalize_signing() -> None:
                 document_filename=st.session_state.pdf_filename,
                 operator_name=settings.operator_name,
                 log_id=log_id,
+                attachment_bytes=signed_bytes,
+                attachment_filename=signed_filename,
             )
             record_email_status(log_id, status)
             email_notes.append(f"{item['name']}: {status}")
